@@ -52,7 +52,7 @@ func New(options Options) (*kubernetes.Clientset, error) {
 	return newClientset(debugf, options.ClusterName, options.ClusterCAData, options.ClusterEndpoint)
 }
 
-// newClientset cria um client para o kubernetes.
+// newClientset creates kubernetes client.
 // FIXME WRITEME TODO XXX Refresh/renew token automatically.
 func newClientset(debugf func(format string, v ...any), clusterName, clusterCAData, clusterEndpoint string) (*kubernetes.Clientset, error) {
 
