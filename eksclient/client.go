@@ -174,8 +174,7 @@ func newClientset(debugf func(format string, v ...any), source TokenSource,
 			transport: rt,
 			debugf:    debugf,
 		}
-	},
-	)
+	})
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {

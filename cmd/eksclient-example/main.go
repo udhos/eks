@@ -117,5 +117,4 @@ func listNamespaces(clientset *kubernetes.Clientset) {
 	for _, ns := range list.Items {
 		fmt.Println(ns.Name)
 	}
-
 }
