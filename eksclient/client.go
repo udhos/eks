@@ -16,18 +16,19 @@ import (
 
 // Options define config for client.
 type Options struct {
-	// ClusterName is required.
+	// ClusterName is required EKS cluster name.
 	ClusterName string
 
-	// ClusterCAData holds PEM-encoded bytes (typically read from a root
-	// certificates bundle).
+	// ClusterCAData is required PEM-encoded bytes (typically read
+	// from a root certificates bundle).
 	ClusterCAData string
 
-	// ClusterEndpoint must be a host string, a host:port pair, or a URL
-	// to the base of the apiserver. If a URL is given then the (optional)
-	// Path of that URL represents a prefix that must be appended to all
-	// request URIs used to access the apiserver. This allows a frontend
-	// proxy to easily relocate all of the apiserver endpoints.
+	// ClusterEndpoint is required host string, a host:port
+	// pair, or a URL to the base of the apiserver. If a URL is given then
+	// the (optional) Path of that URL represents a prefix that must be
+	// appended to all request URIs used to access the apiserver. This
+	// allows a frontend proxy to easily relocate all of the apiserver
+	// endpoints.
 	ClusterEndpoint string
 
 	// DebugLog optionally activates debug logs.
@@ -41,11 +42,11 @@ type Options struct {
 	// Source optionally defines a custom token source.
 	Source TokenSource
 
-	// RefreshEarlier defines how long before token expiration should the token be refreshed.
+	// RefreshEarlier optionally defines how long before token expiration should the token be refreshed.
 	// If unspecified, defaults to 10s.
 	RefreshEarlier time.Duration
 
-	// ReuseToken adds layer to force token reuse. Usually redundant.
+	// ReuseToken optionally adds layer to force token reuse. Usually redundant.
 	ReuseToken bool
 }
 
