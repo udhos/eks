@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
@@ -35,20 +36,31 @@ type Options struct {
 	// Logf optionally defines logging fuction. If unspecified defaults to log.Printf.
 	Logf func(format string, v ...any)
 
+	debugf func(format string, v ...any)
+
 	// Source optionally defines a custom token source.
 	Source TokenSource
+
+	// RefreshEarlier defines how long before token expiration should the token be refreshed.
+	// If unspecified, defaults to 10s.
+	RefreshEarlier time.Duration
+
+	// ReuseToken adds layer to force token reuse. Usually redundant.
+	ReuseToken bool
 }
 
 // TokenSource generates tokens.
 type TokenSource interface {
+	// Get gets current token or generates a new one if the current one has expired or it is close to expire.
 	Get() (token.Token, error)
 }
 
 type tokenGenerator struct {
-	generator      token.Generator
-	options        *token.GetTokenOptions
-	last           token.Token
-	refreshEarlier time.Duration
+	generator    token.Generator
+	tokenOptions *token.GetTokenOptions
+	last         token.Token
+	options      Options
+	lock         sync.Mutex
 }
 
 func newTokenGenerator(options Options) (*tokenGenerator, error) {
@@ -60,32 +72,69 @@ func newTokenGenerator(options Options) (*tokenGenerator, error) {
 		ClusterID: options.ClusterName,
 	}
 	return &tokenGenerator{
-		generator:      gen,
-		options:        opts,
-		refreshEarlier: 10 * time.Second,
+		generator:    gen,
+		tokenOptions: opts,
+		options:      options,
 	}, nil
 }
 
+// Get gets current token or generates a new one if the current one has expired or it is close to expire.
 func (g *tokenGenerator) Get() (token.Token, error) {
-	if needsRefresh(g.refreshEarlier, g.last.Expiration) {
-		tok, err := g.generator.GetWithOptions(g.options)
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	now := time.Now()
+
+	g.debugToken(now, "old token")
+
+	if g.needsRefresh(now) {
+		tok, err := g.generator.GetWithOptions(g.tokenOptions)
 		g.last = tok
+		g.debugToken(now, "new token")
 		return tok, err
 	}
+
 	return g.last, nil
 }
 
-func needsRefresh(refreshEarlier time.Duration, expiration time.Time) bool {
-	return time.Now().Add(refreshEarlier).After(expiration)
+func (g *tokenGenerator) needsRefresh(now time.Time) bool {
+	if g.options.ReuseToken {
+		return now.Add(g.options.RefreshEarlier).After(g.last.Expiration)
+	}
+	return true
+}
+
+func (g *tokenGenerator) debugToken(now time.Time, label string) {
+	refresh := g.needsRefresh(now)
+	remain := g.last.Expiration.Sub(now)
+	if remain < 0 {
+		remain = 0
+	}
+
+	tk := g.last.Token
+	if len(tk) > 20 {
+		tk = tk[len(tk)-19:]
+	}
+
+	g.options.debugf("Get: %s: reuse=%t expiration=%v remain=%v refreshEarlier=%v needsRefresh=%t token=%s",
+		label, g.options.ReuseToken, g.last.Expiration, remain, g.options.RefreshEarlier, refresh, tk)
 }
 
 // New creates kubernetes client.
 func New(options Options) (*kubernetes.Clientset, error) {
 
-	const me = "eksclient.New"
-
 	if options.Logf == nil {
 		options.Logf = log.Printf
+	}
+
+	if options.RefreshEarlier == 0 {
+		options.RefreshEarlier = 10 * time.Second
+	}
+
+	options.debugf = func(format string, v ...any) {
+		if options.DebugLog {
+			options.Logf("DEBUG: eksclient: "+format, v...)
+		}
 	}
 
 	if options.Source == nil {
@@ -96,68 +145,64 @@ func New(options Options) (*kubernetes.Clientset, error) {
 		options.Source = source
 	}
 
-	debugf := func(format string, v ...any) {
-		if options.DebugLog {
-			options.Logf(fmt.Sprintf("DEBUG: %s: ", me)+format, v...)
-		}
-	}
-
-	return newClientset(debugf, options.Source, options.ClusterName, options.ClusterCAData, options.ClusterEndpoint)
+	return newClientset(options.debugf, options.Source, options.ClusterName, options.ClusterCAData, options.ClusterEndpoint)
 }
 
 // newClientset creates kubernetes client.
-// FIXME WRITEME TODO XXX Refresh/renew token automatically.
 func newClientset(debugf func(format string, v ...any), source TokenSource,
 	clusterName, clusterCAData, clusterEndpoint string) (*kubernetes.Clientset, error) {
 
 	debugf("newClientset: clusterName=%s endpoint=%s CA=%s",
 		clusterName, clusterEndpoint, clusterCAData)
 
-	/*
-		tok, err := source.Get()
-		if err != nil {
-			return nil, err
-		}
-	*/
-
 	ca, err := base64.StdEncoding.DecodeString(clusterCAData)
 	if err != nil {
 		return nil, err
 	}
-	clientset, err := kubernetes.NewForConfig(
-		&rest.Config{
-			Host: clusterEndpoint,
 
-			//BearerToken: tok.Token,
-
-			TLSClientConfig: rest.TLSClientConfig{
-				CAData: ca,
-			},
-
-			WrapTransport: func(rt http.RoundTripper) http.RoundTripper {
-				return &tokenTransport{
-					source:    source,
-					transport: rt,
-				}
-			},
+	config := &rest.Config{
+		Host: clusterEndpoint,
+		TLSClientConfig: rest.TLSClientConfig{
+			CAData: ca,
 		},
+	}
+
+	// Adds a transport that refreshes the token when needed.
+	config.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+		return &tokenTransport{
+			source:    source,
+			transport: rt,
+			debugf:    debugf,
+		}
+	},
 	)
+
+	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err
 	}
 	return clientset, nil
 }
 
+// tokenTransport is a transport wrapper that refreshes existing token when it has expired or it is close to expire.
 type tokenTransport struct {
 	source    TokenSource
 	transport http.RoundTripper
+	debugf    func(format string, v ...any)
 }
 
+// RoundTrip refreshes existing token when it has expired or it is close to expire.
 func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+
+	begin := time.Now()
+
 	tok, err := t.source.Get()
 	if err != nil {
 		return nil, err
 	}
+
+	elap := time.Since(begin)
+	t.debugf("RoundTrip: source.Get: %v", elap)
 
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", tok.Token))
 
