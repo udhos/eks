@@ -34,6 +34,10 @@ type Options struct {
 	// DebugLog optionally activates debug logs.
 	DebugLog bool
 
+	// DebugLogFullTokenInsecure enables full token logging.
+	// Otherwise only a truncated token is logged.
+	DebugLogFullTokenInsecure bool
+
 	// Logf optionally defines logging fuction. If unspecified defaults to log.Printf.
 	Logf func(format string, v ...any)
 
@@ -113,8 +117,13 @@ func (g *tokenGenerator) debugToken(now time.Time, label string) {
 	}
 
 	tk := g.last.Token
-	if len(tk) > 20 {
-		tk = tk[len(tk)-19:]
+	if !g.options.DebugLogFullTokenInsecure {
+		//
+		// truncate token for logging
+		//
+		if len(tk) > 20 {
+			tk = tk[len(tk)-19:] + "(truncated)"
+		}
 	}
 
 	g.options.debugf("Get: %s: reuse=%t expiration=%v remain=%v refreshEarlier=%v needsRefresh=%t token=%s",

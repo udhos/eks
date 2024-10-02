@@ -34,21 +34,8 @@ func main() {
 
 	clusterName := os.Args[1]
 
-	const defaultReuse = false
-	reuse := defaultReuse
-	{
-		const envReuse = "REUSE_TOKEN"
-		r := os.Getenv(envReuse)
-		if r != "" {
-			rr, errParse := strconv.ParseBool(r)
-			if errParse != nil {
-				log.Fatalf("parse error: %s='%s': %v", envReuse, r, errParse)
-			}
-			reuse = rr
-		}
-		log.Printf("%s='%s' default=%t reuse=%t",
-			envReuse, r, defaultReuse, reuse)
-	}
+	reuse := envBool("REUSE_TOKEN", false)
+	logFullTokenInsecure := envBool("LOG_FULL_TOKEN_INSECURE", false)
 
 	//
 	// create eks client
@@ -85,11 +72,12 @@ func main() {
 	//
 
 	eksclientOptions := eksclient.Options{
-		ClusterName:     clusterName,
-		ClusterCAData:   clusterCAData,
-		ClusterEndpoint: clusterEndpoint,
-		DebugLog:        true,
-		ReuseToken:      reuse,
+		ClusterName:               clusterName,
+		ClusterCAData:             clusterCAData,
+		ClusterEndpoint:           clusterEndpoint,
+		DebugLog:                  true,
+		DebugLogFullTokenInsecure: logFullTokenInsecure,
+		ReuseToken:                reuse,
 	}
 
 	clientset, errClientset := eksclient.New(eksclientOptions)
@@ -117,4 +105,21 @@ func listNamespaces(clientset *kubernetes.Clientset) {
 	for _, ns := range list.Items {
 		fmt.Println(ns.Name)
 	}
+}
+
+// envBool extracts boolean value from env var.
+// It returns the provided defaultValue if the env var is empty.
+// The value returned is also recorded in logs.
+func envBool(name string, defaultValue bool) bool {
+	str := os.Getenv(name)
+	if str != "" {
+		value, errConv := strconv.ParseBool(str)
+		if errConv == nil {
+			log.Printf("%s=[%s] using %s=%v default=%v", name, str, name, value, defaultValue)
+			return value
+		}
+		log.Printf("bad %s=[%s]: error: %v", name, str, errConv)
+	}
+	log.Printf("%s=[%s] using %s=%v default=%v", name, str, name, defaultValue, defaultValue)
+	return defaultValue
 }
