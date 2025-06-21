@@ -2,6 +2,7 @@
 package eksclient
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -57,7 +58,7 @@ type Options struct {
 // TokenSource generates tokens.
 type TokenSource interface {
 	// Get gets current token or generates a new one if the current one has expired or it is close to expire.
-	Get() (token.Token, error)
+	Get(ctx context.Context) (token.Token, error)
 }
 
 type tokenGenerator struct {
@@ -84,7 +85,7 @@ func newTokenGenerator(options Options) (*tokenGenerator, error) {
 }
 
 // Get gets current token or generates a new one if the current one has expired or it is close to expire.
-func (g *tokenGenerator) Get() (token.Token, error) {
+func (g *tokenGenerator) Get(ctx context.Context) (token.Token, error) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
@@ -93,7 +94,7 @@ func (g *tokenGenerator) Get() (token.Token, error) {
 	g.debugToken(now, "old token")
 
 	if g.needsRefresh(now) {
-		tok, err := g.generator.GetWithOptions(g.tokenOptions)
+		tok, err := g.generator.GetWithOptions(ctx, g.tokenOptions)
 		g.last = tok
 		g.debugToken(now, "new token")
 		return tok, err
@@ -205,7 +206,7 @@ func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	begin := time.Now()
 
-	tok, err := t.source.Get()
+	tok, err := t.source.Get(req.Context())
 	if err != nil {
 		return nil, err
 	}
