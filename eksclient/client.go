@@ -112,10 +112,7 @@ func (g *tokenGenerator) needsRefresh(now time.Time) bool {
 
 func (g *tokenGenerator) debugToken(now time.Time, label string) {
 	refresh := g.needsRefresh(now)
-	remain := g.last.Expiration.Sub(now)
-	if remain < 0 {
-		remain = 0
-	}
+	remain := max(g.last.Expiration.Sub(now), 0)
 
 	tk := g.last.Token
 	if !g.options.DebugLogFullTokenInsecure {
